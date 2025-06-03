@@ -38,6 +38,13 @@ const mockQuizData = [
     options: ["Go", "Gd", "Au", "Ag"],
     correctAnswer: 2,
     explanation: "Au comes from the Latin word 'aurum' meaning gold. It's element 79 on the periodic table."
+  },
+  {
+    id: 5,
+    question: "Who is God to you?",
+    options: ["Father", "Friend", "Maker", "All"],
+    correctAnswer: 3,
+    explanation: "Who God is to you can vary greatly depending on personal beliefs and experiences. Many see God as a father figure, a friend, or the creator of the universe, while others may have different interpretations."
   }
 ];
 
