@@ -353,7 +353,7 @@ const QuizApp = () => {
                   onClick={toggleExplanation}
                   className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold xsm:py-3 px-3 xsm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
                 >
-                  {showExplanation ? "Hide" : "Show"} Explanation
+                  {showExplanation ? "Hide" : "Show"} Explanation.
                 </button>
 
                 <button
