@@ -6,7 +6,6 @@ import {
   XCircle,
   RefreshCw,
   Play,
-  Info,
 } from "lucide-react";
 
 // Mock quiz data - replace with your API call
