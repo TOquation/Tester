@@ -1,10 +1,11 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Clock, CheckCircle, XCircle, RefreshCw, Play } from "lucide-react";
 import TechQuizHeader from "@/components/animated-header";
+import { QuizQuestion } from "@/types/quiz";
 
 // Mock quiz data - replace with your API call
-const mockQuizData = [
+const mockQuizData: QuizQuestion[] = [
   {
     id: 1,
     question: "What is the capital of France?",
@@ -55,8 +56,15 @@ const mockQuizData = [
   },
 ];
 
-// Animated Header Component
-<TechQuizHeader />
+// Function to shuffle array (Fisher-Yates algorithm)
+const shuffleArray = (array: QuizQuestion[]): QuizQuestion[] => {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+};
 
 const QuizApp = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -67,77 +75,22 @@ const QuizApp = () => {
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [questions, setQuestions] = useState(mockQuizData);
+  const [questions, setQuestions] = useState<QuizQuestion[]>(mockQuizData);
 
-  // Function to shuffle array (Fisher-Yates algorithm)
-  const shuffleArray = (array: any[]) => {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-  };
-
-  // Timer effect
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isActive && timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimeLeft((timeLeft) => timeLeft - 1);
-      }, 1000);
-    } else if (timeLeft === 0 && isActive) {
-      handleTimeUp();
-    }
-    return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
-    };
-  }, [isActive, timeLeft]);
-
-  const startQuiz = () => {
-    // Shuffle questions when starting the quiz
-    setQuestions(shuffleArray(mockQuizData));
-    setIsActive(true);
-    setTimeLeft(20);
-    setCurrentQuestion(0);
-    setScore(0);
-    setQuizCompleted(false);
-    setShowResult(false);
-    setSelectedAnswer(null);
-  };
-
-  const handleTimeUp = () => {
-    setIsActive(false);
-    setShowResult(true);
-    if (selectedAnswer !== null) {
-      handleAnswerSubmit();
-    } else {
-      // Auto move to next question if no answer selected
-      setTimeout(() => {
-        moveToNext();
-      }, 2000);
-    }
-  };
-
-  const handleAnswerSelect = (answerIndex: number) => {
-    if (!isActive || showResult) return;
-    setSelectedAnswer(answerIndex);
-  };
-
-  const handleAnswerSubmit = () => {
+  // Memoize handleAnswerSubmit to stabilize dependencies
+  const handleAnswerSubmit = useCallback(() => {
     if (selectedAnswer === null) return;
 
     setIsActive(false);
     setShowResult(true);
 
     if (selectedAnswer === questions[currentQuestion].correctAnswer) {
-      setScore(score + 1);
+      setScore((prevScore) => prevScore + 1);
     }
-  };
+  }, [selectedAnswer, questions, currentQuestion]);
 
-  const moveToNext = () => {
+  // Memoize moveToNext to stabilize dependencies
+  const moveToNext = useCallback(() => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
       setSelectedAnswer(null);
@@ -149,6 +102,53 @@ const QuizApp = () => {
       setQuizCompleted(true);
       setIsActive(false);
     }
+  }, [currentQuestion, questions.length]);
+
+  // Memoize handleTimeUp to prevent re-creation on every render
+  const handleTimeUp = useCallback(() => {
+    setIsActive(false);
+    setShowResult(true);
+    if (selectedAnswer !== null) {
+      handleAnswerSubmit();
+    } else {
+      // Auto move to next question if no answer selected
+      setTimeout(() => {
+        moveToNext();
+      }, 2000);
+    }
+  }, [selectedAnswer, handleAnswerSubmit, moveToNext]);
+
+  // Timer effect
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (isActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prevTime) => prevTime - 1);
+      }, 1000);
+    } else if (timeLeft === 0 && isActive) {
+      handleTimeUp();
+    }
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isActive, timeLeft, handleTimeUp]);
+
+  const startQuiz = () => {
+    setQuestions(shuffleArray(mockQuizData));
+    setIsActive(true);
+    setTimeLeft(20);
+    setCurrentQuestion(0);
+    setScore(0);
+    setQuizCompleted(false);
+    setShowResult(false);
+    setSelectedAnswer(null);
+  };
+
+  const handleAnswerSelect = (answerIndex: number) => {
+    if (!isActive || showResult) return;
+    setSelectedAnswer(answerIndex);
   };
 
   const resetQuiz = () => {
@@ -160,7 +160,6 @@ const QuizApp = () => {
     setQuizCompleted(false);
     setShowResult(false);
     setShowExplanation(false);
-    // Shuffle questions again when resetting
     setQuestions(shuffleArray(mockQuizData));
   };
 
@@ -186,7 +185,6 @@ const QuizApp = () => {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
         <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20">
-         
           <div className="mb-6">
             <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
               <CheckCircle className="w-10 h-10 text-white" />
@@ -250,6 +248,7 @@ const QuizApp = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
       <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-2xl min-h-[300px] w-full shadow-2xl border border-white/20">
+       
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div className="text-white">
@@ -363,25 +362,23 @@ const QuizApp = () => {
           )}
 
           {showResult && (
-            <>
-              <div className="container mx-auto flex gap-2 sm:gap-4">
-                <button
-                  onClick={toggleExplanation}
-                  className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 xsm:py-4 px-3 xsm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
-                >
-                  {showExplanation ? "Hide" : "Show"} Explanation
-                </button>
+            <div className="container mx-auto flex gap-2 sm:gap-4">
+              <button
+                onClick={toggleExplanation}
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 px-3 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+              >
+                {showExplanation ? "Hide" : "Show"} Explanation
+              </button>
 
-                <button
-                  onClick={moveToNext}
-                  className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 xsm:py-4 px-4 xsm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
-                >
-                  {currentQuestion === questions.length - 1
-                    ? "Finish Quiz"
-                    : "Next Question"}
-                </button>
-              </div>
-            </>
+              <button
+                onClick={moveToNext}
+                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 sm:py-4 px-4 sm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
+              >
+                {currentQuestion === questions.length - 1
+                  ? "Finish Quiz"
+                  : "Next Question"}
+              </button>
+            </div>
           )}
         </div>
 
