@@ -13,8 +13,39 @@ import TechQuizHeader from "@/components/animated-header";
 import { QuizQuestion } from "@/types/quiz";
 import { mockQuizData } from "@/data/question";
 
+// Interface for OpenTDB API question
+interface OpenTDBQuestion {
+  correct_answer: string;
+  incorrect_answers: string[];
+  question: string;
+}
+
+// Interface for OpenTDB API response
+interface OpenTDBResponse {
+  response_code: number;
+  results: OpenTDBQuestion[];
+}
+
+// Interface for mock quiz data
+interface MockQuizQuestion {
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+}
+
+// Type for mockQuizData
+const typedMockQuizData: MockQuizQuestion[] =
+  mockQuizData as MockQuizQuestion[];
+
+// Interface for EmailJS error
+interface EmailJSError {
+  status?: number;
+  text?: string;
+}
+
 // Shuffle array (Fisher-Yates algorithm)
-const shuffleArray = (array: any[]) => {
+const shuffleArray = <T,>(array: T[]): T[] => {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -24,7 +55,7 @@ const shuffleArray = (array: any[]) => {
 };
 
 // Decode HTML entities
-const decodeHtml = (html: string) => {
+const decodeHtml = (html: string): string => {
   const txt = document.createElement("textarea");
   txt.innerHTML = html;
   return txt.value;
@@ -47,15 +78,36 @@ const QuizApp = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
 
+  // EmailJS configuration
+  const EMAIL_CONFIG = {
+    PUBLIC_KEY: process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY || "",
+    SERVICE_ID: process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID || "",
+    TEMPLATE_ID: process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID || "",
+    TO_EMAIL: process.env.NEXT_PUBLIC_TO_EMAIL || "",
+  };
+
   // Initialize EmailJS
   useEffect(() => {
-    emailjs.init("YOUR_PUBLIC_KEY"); // Replace with your EmailJS Public Key
-  }, []);
+    if (!EMAIL_CONFIG.PUBLIC_KEY) {
+      console.warn(
+        "EmailJS public key is missing. Email functionality will be disabled."
+      );
+      return;
+    }
+    try {
+      emailjs.init({ publicKey: EMAIL_CONFIG.PUBLIC_KEY });
+    } catch (err) {
+      console.error("Failed to initialize EmailJS:", err);
+    }
+  }, [EMAIL_CONFIG.PUBLIC_KEY]);
 
-  // Fetch session token (unchanged)
+  // Fetch session token
   const fetchSessionToken = useCallback(async () => {
     try {
-      const cachedToken = localStorage.getItem("quizSessionToken");
+      const cachedToken =
+        typeof window !== "undefined"
+          ? localStorage.getItem("quizSessionToken")
+          : null;
       if (cachedToken) {
         setSessionToken(cachedToken);
         return cachedToken;
@@ -65,7 +117,9 @@ const QuizApp = () => {
       );
       const data = await response.json();
       if (data.response_code === 0) {
-        localStorage.setItem("quizSessionToken", data.token);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("quizSessionToken", data.token);
+        }
         setSessionToken(data.token);
         return data.token;
       } else {
@@ -78,24 +132,26 @@ const QuizApp = () => {
     }
   }, []);
 
-  // Fetch questions (unchanged)
+  // Fetch questions
   const fetchQuestions = useCallback(
     async (retryCount = 0) => {
       const maxRetries = 3;
-      const cacheDuration = 12 * 60 * 60 * 1000;
+      const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
       setLoading(true);
       setError(null);
-      const cachedQuestions = localStorage.getItem("quizQuestions");
-      const cacheTime = localStorage.getItem("quizCacheTime");
-      if (
-        cachedQuestions &&
-        cacheTime &&
-        Date.now() - parseInt(cacheTime) < cacheDuration
-      ) {
-        const parsedQuestions = JSON.parse(cachedQuestions);
-        setQuestions(shuffleArray(parsedQuestions));
-        setLoading(false);
-        return;
+      if (typeof window !== "undefined") {
+        const cachedQuestions = localStorage.getItem("quizQuestions");
+        const cacheTime = localStorage.getItem("quizCacheTime");
+        if (
+          cachedQuestions &&
+          cacheTime &&
+          Date.now() - parseInt(cacheTime) < cacheDuration
+        ) {
+          const parsedQuestions: QuizQuestion[] = JSON.parse(cachedQuestions);
+          setQuestions(shuffleArray(parsedQuestions));
+          setLoading(false);
+          return;
+        }
       }
       try {
         const token = sessionToken || (await fetchSessionToken());
@@ -110,9 +166,18 @@ const QuizApp = () => {
             );
             return fetchQuestions(retryCount + 1);
           }
-          throw new Error(`HTTP error ${response.status}`);
+          console.warn("API unavailable, switching to mock data");
+          // Transform mockQuizData to include id
+          const mockQuestionsWithId = typedMockQuizData.map((item, index) => ({
+            ...item,
+            id: index,
+          }));
+          setQuestions(shuffleArray(mockQuestionsWithId));
+          setError("API unavailable. Using mock data.");
+          setLoading(false);
+          return;
         }
-        const data = await response.json();
+        const data: OpenTDBResponse = await response.json();
         if (data.response_code !== 0) {
           const errorMessages: { [key: number]: string } = {
             1: "No questions available for the selected category.",
@@ -122,7 +187,9 @@ const QuizApp = () => {
             5: "Rate limit exceeded. Please try again later.",
           };
           if (data.response_code === 3 || data.response_code === 4) {
-            localStorage.removeItem("quizSessionToken");
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("quizSessionToken");
+            }
             const newToken = await fetchSessionToken();
             if (newToken && retryCount < maxRetries) {
               setSessionToken(newToken);
@@ -130,15 +197,11 @@ const QuizApp = () => {
             }
           }
           throw new Error(
-            errorMessages[data.response_code as number] || "Unknown API error."
+            errorMessages[data.response_code] || "Unknown API error."
           );
         }
         const transformedQuestions = data.results.map(
-          (item: {
-            correct_answer: any;
-            incorrect_answers: any[];
-            question: any;
-          }) => {
+          (item: OpenTDBQuestion, index: number): QuizQuestion => {
             const options = shuffleArray([
               decodeHtml(item.correct_answer),
               ...item.incorrect_answers.map(decodeHtml),
@@ -147,6 +210,7 @@ const QuizApp = () => {
               decodeHtml(item.correct_answer)
             );
             return {
+              id: index,
               question: decodeHtml(item.question),
               options,
               correctAnswer,
@@ -154,31 +218,40 @@ const QuizApp = () => {
             };
           }
         );
-        localStorage.setItem(
-          "quizQuestions",
-          JSON.stringify(transformedQuestions)
-        );
-        localStorage.setItem("quizCacheTime", Date.now().toString());
+        if (typeof window !== "undefined") {
+          localStorage.setItem(
+            "quizQuestions",
+            JSON.stringify(transformedQuestions)
+          );
+          localStorage.setItem("quizCacheTime", Date.now().toString());
+        }
         setQuestions(shuffleArray(transformedQuestions));
       } catch (err: unknown) {
         const errorMessage =
           err instanceof Error ? err.message : "An unknown error occurred";
         console.error("Fetch error:", errorMessage);
-        if (retryCount < maxRetries) {
+        if (retryCount >= maxRetries) {
+          console.warn("Using mock data as fallback");
+          // Transform mockQuizData to include id
+          const mockQuestionsWithId = typedMockQuizData.map((item, index) => ({
+            ...item,
+            id: index,
+          }));
+          setQuestions(shuffleArray(mockQuestionsWithId));
+          setError(
+            "Failed to load API questions after multiple attempts. Using mock data."
+          );
+        } else {
           setTimeout(
             () => fetchQuestions(retryCount + 1),
             3000 * (retryCount + 1)
           );
-        } else {
-          console.warn("Using mock data as fallback");
-          setQuestions(shuffleArray(mockQuizData));
-          setError("Failed to load API questions. Using mock data.");
         }
       } finally {
         setLoading(false);
       }
     },
-    [sessionToken]
+    [sessionToken, fetchSessionToken]
   );
 
   // Submit score via EmailJS
@@ -187,36 +260,127 @@ const QuizApp = () => {
       setSubmitMessage("Please enter your name.");
       return;
     }
+
+    // Validate EmailJS configuration
+    if (
+      !EMAIL_CONFIG.PUBLIC_KEY ||
+      !EMAIL_CONFIG.SERVICE_ID ||
+      !EMAIL_CONFIG.TEMPLATE_ID ||
+      !EMAIL_CONFIG.TO_EMAIL
+    ) {
+      const missingVars = [];
+      if (!EMAIL_CONFIG.PUBLIC_KEY) missingVars.push("PUBLIC_KEY");
+      if (!EMAIL_CONFIG.SERVICE_ID) missingVars.push("SERVICE_ID");
+      if (!EMAIL_CONFIG.TEMPLATE_ID) missingVars.push("TEMPLATE_ID");
+      if (!EMAIL_CONFIG.TO_EMAIL) missingVars.push("TO_EMAIL");
+      setSubmitMessage(
+        `Email service configuration incomplete. Missing: ${missingVars.join(
+          ", "
+        )}. Score saved locally.`
+      );
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "lastQuizScore",
+          JSON.stringify({
+            name: userName,
+            score: score,
+            total: questions.length,
+            percentage: Math.round((score / questions.length) * 100),
+            date: new Date().toISOString(),
+          })
+        );
+      }
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitMessage("");
+
     try {
-      await emailjs.send(
-        "service_irp932w", // Replace with your EmailJS Service ID
-        "template_5zgtvar", // Replace with your EmailJS Template ID
+      const templateParams = {
+        name: userName,
+        score: score,
+        total: questions.length,
+        percentage: Math.round((score / questions.length) * 100),
+        to_email: EMAIL_CONFIG.TO_EMAIL,
+        date: new Date().toLocaleDateString(),
+        time: new Date().toLocaleTimeString(),
+      };
+
+      const result = await emailjs.send(
+        EMAIL_CONFIG.SERVICE_ID,
+        EMAIL_CONFIG.TEMPLATE_ID,
+        templateParams,
         {
-          name: userName,
-          score: score,
-          total: questions.length,
-          percentage: Math.round((score / questions.length) * 100),
-          to_email: "oparajitee4@gmail.com",
-        },
-        "tl7bPZzm7r77rZrKF" // Replace with your EmailJS Public Key
+          publicKey: EMAIL_CONFIG.PUBLIC_KEY,
+        }
       );
-      setSubmitMessage("Score submitted successfully!");
-    } catch (err) {
+
+      if (result.status === 200) {
+        setSubmitMessage("Score submitted successfully!");
+        if (typeof window !== "undefined") {
+          localStorage.setItem(
+            "lastQuizScore",
+            JSON.stringify({
+              ...templateParams,
+              date: new Date().toISOString(),
+            })
+          );
+        }
+      } else {
+        throw new Error(`EmailJS request failed with status: ${result.status}`);
+      }
+    } catch (err: unknown) {
       console.error("Email submission error:", err);
-      setSubmitMessage("Error submitting score. Please try again later.");
+      let errorMessage = "Failed to submit score. Please try again.";
+
+      if (err instanceof Error) {
+        if (err.message.includes("network") || err.message.includes("fetch")) {
+          errorMessage =
+            "Network error. Please check your connection and try again.";
+        } else if (
+          err.message.includes("Invalid") ||
+          err.message.includes("not found") ||
+          err.message.includes("401") ||
+          err.message.includes("403")
+        ) {
+          errorMessage =
+            "Invalid EmailJS configuration. Please check your EmailJS settings.";
+        } else {
+          errorMessage = `EmailJS error: ${err.message}`;
+        }
+      } else if (typeof err === "object" && err !== null && "text" in err) {
+        errorMessage = `EmailJS error: ${(err as EmailJSError).text}`;
+      } else {
+        errorMessage =
+          "An unexpected error occurred while submitting your score.";
+      }
+
+      setSubmitMessage(errorMessage);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "lastQuizScore",
+          JSON.stringify({
+            name: userName,
+            score: score,
+            total: questions.length,
+            percentage: Math.round((score / questions.length) * 100),
+            date: new Date().toISOString(),
+          })
+        );
+      }
+      setSubmitMessage(errorMessage + " Score saved locally.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Initialize quiz (unchanged)
+  // Initialize quiz
   useEffect(() => {
     fetchQuestions();
   }, [fetchQuestions]);
 
-  // Handle answer selection (unchanged)
+  // Handle answer selection
   const handleAnswerSelect = useCallback(
     (answerIndex: number) => {
       if (!isActive || showResult) return;
@@ -225,7 +389,7 @@ const QuizApp = () => {
     [isActive, showResult]
   );
 
-  // Handle answer submission (unchanged)
+  // Handle answer submission
   const handleAnswerSubmit = useCallback(() => {
     if (selectedAnswer === null) return;
     setIsActive(false);
@@ -235,7 +399,7 @@ const QuizApp = () => {
     }
   }, [selectedAnswer, questions, currentQuestion]);
 
-  // Move to next question (unchanged)
+  // Move to next question
   const moveToNext = useCallback(() => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
@@ -250,7 +414,7 @@ const QuizApp = () => {
     }
   }, [currentQuestion, questions.length]);
 
-  // Handle time up (unchanged)
+  // Handle time up
   const handleTimeUp = useCallback(() => {
     setIsActive(false);
     setShowResult(true);
@@ -263,9 +427,9 @@ const QuizApp = () => {
     }
   }, [selectedAnswer, handleAnswerSubmit, moveToNext]);
 
-  // Timer effect (unchanged)
+  // Timer effect
   useEffect(() => {
-    let interval = null;
+    let interval: NodeJS.Timeout | null = null;
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prevTime) => prevTime - 1);
@@ -305,35 +469,37 @@ const QuizApp = () => {
     setShowExplanation(false);
     setUserName("");
     setSubmitMessage("");
-    localStorage.removeItem("quizQuestions");
-    localStorage.removeItem("quizCacheTime");
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("quizQuestions");
+      localStorage.removeItem("quizCacheTime");
+    }
     fetchQuestions();
     console.log("Quiz reset");
   }, [fetchQuestions]);
 
-  // Toggle explanation (unchanged)
+  // Toggle explanation
   const toggleExplanation = () => {
     setShowExplanation(!showExplanation);
   };
 
-  // Format time (unchanged)
-  const formatTime = (seconds: number) => {
+  // Format time
+  const formatTime = (seconds: number): string => {
     return seconds.toString().padStart(2, "0");
   };
 
-  // Get timer color (unchanged)
-  const getTimerColor = () => {
+  // Get timer color
+  const getTimerColor = (): string => {
     if (timeLeft <= 5) return "text-red-500";
     if (timeLeft <= 10) return "text-yellow-500";
     return "text-green-500";
   };
 
-  // Get progress width (unchanged)
-  const getProgressWidth = () => {
+  // Get progress width
+  const getProgressWidth = (): number => {
     return ((20 - timeLeft) / 20) * 100;
   };
 
-  // Loading screen (unchanged)
+  // Loading screen
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
@@ -446,7 +612,8 @@ const QuizApp = () => {
             {submitMessage && (
               <p
                 className={`mt-2 text-sm ${
-                  submitMessage.includes("Error")
+                  submitMessage.includes("Error") ||
+                  submitMessage.includes("error")
                     ? "text-red-400"
                     : "text-green-400"
                 }`}
@@ -471,7 +638,7 @@ const QuizApp = () => {
     );
   }
 
-  // Start screen (unchanged)
+  // Start screen
   if (!isActive && currentQuestion === 0 && !showResult) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
@@ -509,7 +676,7 @@ const QuizApp = () => {
     );
   }
 
-  // Quiz in progress (unchanged)
+  // Quiz in progress
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
       <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-white/20">
@@ -622,7 +789,7 @@ const QuizApp = () => {
               </button>
               <button
                 onClick={moveToNext}
-                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-600 hover:to-blue-600 sm:px-4"
+                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white font-semibold py-3 px-6 transition-all duration-300 transform hover:scale-105"
               >
                 {currentQuestion === questions.length - 1
                   ? "Finish Quiz"
