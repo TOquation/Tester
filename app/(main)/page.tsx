@@ -1,69 +1,33 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { Clock, CheckCircle, XCircle, RefreshCw, Play } from "lucide-react";
+import {
+  Clock,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  Play,
+  Snowflake,
+} from "lucide-react";
+import emailjs from "@emailjs/browser";
 import TechQuizHeader from "@/components/animated-header";
 import { QuizQuestion } from "@/types/quiz";
+import { mockQuizData } from "@/data/question";
 
-// Mock quiz data - replace with your API call
-const mockQuizData: QuizQuestion[] = [
-  {
-    id: 1,
-    question: "What is the capital of France?",
-    options: ["London", "Berlin", "Paris", "Madrid"],
-    correctAnswer: 2,
-    explanation:
-      "Paris is the capital and largest city of France, known for landmarks like the Eiffel Tower and Louvre Museum.",
-  },
-  {
-    id: 2,
-    question: "Which planet is known as the Red Planet?",
-    options: ["Venus", "Mars", "Jupiter", "Saturn"],
-    correctAnswer: 1,
-    explanation:
-      "Mars is called the Red Planet due to iron oxide (rust) on its surface, giving it a reddish appearance.",
-  },
-  {
-    id: 3,
-    question: "What is the largest mammal in the world?",
-    options: ["African Elephant", "Blue Whale", "Giraffe", "Polar Bear"],
-    correctAnswer: 1,
-    explanation:
-      "The Blue Whale is the largest animal ever known to have lived on Earth, reaching lengths of up to 100 feet.",
-  },
-  {
-    id: 4,
-    question: "In which year did World War II end?",
-    options: ["1944", "1945", "1946", "1947"],
-    correctAnswer: 1,
-    explanation:
-      "World War II ended in 1945 with the surrender of Japan in September, following the atomic bombings and Soviet invasion.",
-  },
-  {
-    id: 5,
-    question: "What is the chemical symbol for gold?",
-    options: ["Go", "Gd", "Au", "Ag"],
-    correctAnswer: 2,
-    explanation:
-      "Au comes from the Latin word 'aurum' meaning gold. It's element 79 on the periodic table.",
-  },
-  {
-    id: 6,
-    question: "Who is God to you?",
-    options: ["Father", "Friend", "Maker", "All"],
-    correctAnswer: 3,
-    explanation:
-      "Who God is to you can vary greatly depending on personal beliefs and experiences. Many see God as a father figure, a friend, or the creator of the universe, while others may have different interpretations.",
-  },
-];
-
-// Function to shuffle array (Fisher-Yates algorithm)
-const shuffleArray = (array: QuizQuestion[]): QuizQuestion[] => {
+// Shuffle array (Fisher-Yates algorithm)
+const shuffleArray = (array: any[]) => {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    [shuffled[i], shuffled[j]] = [shuffled[i], shuffled[j]];
   }
   return shuffled;
+};
+
+// Decode HTML entities
+const decodeHtml = (html: string) => {
+  const txt = document.createElement("textarea");
+  txt.innerHTML = html;
+  return txt.value;
 };
 
 const QuizApp = () => {
@@ -75,21 +39,203 @@ const QuizApp = () => {
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [questions, setQuestions] = useState<QuizQuestion[]>(mockQuizData);
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [userName, setUserName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
 
-  // Memoize handleAnswerSubmit to stabilize dependencies
+  // Initialize EmailJS
+  useEffect(() => {
+    emailjs.init("YOUR_PUBLIC_KEY"); // Replace with your EmailJS Public Key
+  }, []);
+
+  // Fetch session token (unchanged)
+  const fetchSessionToken = useCallback(async () => {
+    try {
+      const cachedToken = localStorage.getItem("quizSessionToken");
+      if (cachedToken) {
+        setSessionToken(cachedToken);
+        return cachedToken;
+      }
+      const response = await fetch(
+        "https://opentdb.com/api_token.php?command=request"
+      );
+      const data = await response.json();
+      if (data.response_code === 0) {
+        localStorage.setItem("quizSessionToken", data.token);
+        setSessionToken(data.token);
+        return data.token;
+      } else {
+        console.error("Failed to fetch session token:", data);
+        return null;
+      }
+    } catch (err) {
+      console.error("Error fetching session token:", err);
+      return null;
+    }
+  }, []);
+
+  // Fetch questions (unchanged)
+  const fetchQuestions = useCallback(
+    async (retryCount = 0) => {
+      const maxRetries = 3;
+      const cacheDuration = 12 * 60 * 60 * 1000;
+      setLoading(true);
+      setError(null);
+      const cachedQuestions = localStorage.getItem("quizQuestions");
+      const cacheTime = localStorage.getItem("quizCacheTime");
+      if (
+        cachedQuestions &&
+        cacheTime &&
+        Date.now() - parseInt(cacheTime) < cacheDuration
+      ) {
+        const parsedQuestions = JSON.parse(cachedQuestions);
+        setQuestions(shuffleArray(parsedQuestions));
+        setLoading(false);
+        return;
+      }
+      try {
+        const token = sessionToken || (await fetchSessionToken());
+        const baseUrl =
+          "https://opentdb.com/api.php?amount=30&category=9&difficulty=medium&type=multiple";
+        const apiUrl = token ? `${baseUrl}&token=${token}` : baseUrl;
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+          if (response.status === 429 && retryCount < maxRetries) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 3000 * (retryCount + 1))
+            );
+            return fetchQuestions(retryCount + 1);
+          }
+          throw new Error(`HTTP error ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.response_code !== 0) {
+          const errorMessages: { [key: number]: string } = {
+            1: "No questions available for the selected category.",
+            2: "Invalid parameters in API request.",
+            3: "Session token not found. Fetching new token.",
+            4: "Session token exhausted. Resetting token.",
+            5: "Rate limit exceeded. Please try again later.",
+          };
+          if (data.response_code === 3 || data.response_code === 4) {
+            localStorage.removeItem("quizSessionToken");
+            const newToken = await fetchSessionToken();
+            if (newToken && retryCount < maxRetries) {
+              setSessionToken(newToken);
+              return fetchQuestions(retryCount + 1);
+            }
+          }
+          throw new Error(
+            errorMessages[data.response_code as number] || "Unknown API error."
+          );
+        }
+        const transformedQuestions = data.results.map(
+          (item: {
+            correct_answer: any;
+            incorrect_answers: any[];
+            question: any;
+          }) => {
+            const options = shuffleArray([
+              decodeHtml(item.correct_answer),
+              ...item.incorrect_answers.map(decodeHtml),
+            ]);
+            const correctAnswer = options.indexOf(
+              decodeHtml(item.correct_answer)
+            );
+            return {
+              question: decodeHtml(item.question),
+              options,
+              correctAnswer,
+              explanation: "No explanation provided by the API.",
+            };
+          }
+        );
+        localStorage.setItem(
+          "quizQuestions",
+          JSON.stringify(transformedQuestions)
+        );
+        localStorage.setItem("quizCacheTime", Date.now().toString());
+        setQuestions(shuffleArray(transformedQuestions));
+      } catch (err: unknown) {
+        const errorMessage =
+          err instanceof Error ? err.message : "An unknown error occurred";
+        console.error("Fetch error:", errorMessage);
+        if (retryCount < maxRetries) {
+          setTimeout(
+            () => fetchQuestions(retryCount + 1),
+            3000 * (retryCount + 1)
+          );
+        } else {
+          console.warn("Using mock data as fallback");
+          setQuestions(shuffleArray(mockQuizData));
+          setError("Failed to load API questions. Using mock data.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionToken]
+  );
+
+  // Submit score via EmailJS
+  const submitScoreViaEmail = async () => {
+    if (!userName.trim()) {
+      setSubmitMessage("Please enter your name.");
+      return;
+    }
+    setIsSubmitting(true);
+    setSubmitMessage("");
+    try {
+      await emailjs.send(
+        "service_irp932w", // Replace with your EmailJS Service ID
+        "template_5zgtvar", // Replace with your EmailJS Template ID
+        {
+          name: userName,
+          score: score,
+          total: questions.length,
+          percentage: Math.round((score / questions.length) * 100),
+          to_email: "oparajitee4@gmail.com",
+        },
+        "tl7bPZzm7r77rZrKF" // Replace with your EmailJS Public Key
+      );
+      setSubmitMessage("Score submitted successfully!");
+    } catch (err) {
+      console.error("Email submission error:", err);
+      setSubmitMessage("Error submitting score. Please try again later.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Initialize quiz (unchanged)
+  useEffect(() => {
+    fetchQuestions();
+  }, [fetchQuestions]);
+
+  // Handle answer selection (unchanged)
+  const handleAnswerSelect = useCallback(
+    (answerIndex: number) => {
+      if (!isActive || showResult) return;
+      setSelectedAnswer(answerIndex);
+    },
+    [isActive, showResult]
+  );
+
+  // Handle answer submission (unchanged)
   const handleAnswerSubmit = useCallback(() => {
     if (selectedAnswer === null) return;
-
     setIsActive(false);
     setShowResult(true);
-
     if (selectedAnswer === questions[currentQuestion].correctAnswer) {
       setScore((prevScore) => prevScore + 1);
     }
   }, [selectedAnswer, questions, currentQuestion]);
 
-  // Memoize moveToNext to stabilize dependencies
+  // Move to next question (unchanged)
   const moveToNext = useCallback(() => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
@@ -104,23 +250,22 @@ const QuizApp = () => {
     }
   }, [currentQuestion, questions.length]);
 
-  // Memoize handleTimeUp to prevent re-creation on every render
+  // Handle time up (unchanged)
   const handleTimeUp = useCallback(() => {
     setIsActive(false);
     setShowResult(true);
     if (selectedAnswer !== null) {
       handleAnswerSubmit();
     } else {
-      // Auto move to next question if no answer selected
       setTimeout(() => {
         moveToNext();
       }, 2000);
     }
   }, [selectedAnswer, handleAnswerSubmit, moveToNext]);
 
-  // Timer effect
+  // Timer effect (unchanged)
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let interval = null;
     if (isActive && timeLeft > 0) {
       interval = setInterval(() => {
         setTimeLeft((prevTime) => prevTime - 1);
@@ -129,14 +274,12 @@ const QuizApp = () => {
       handleTimeUp();
     }
     return () => {
-      if (interval) {
-        clearInterval(interval);
-      }
+      if (interval) clearInterval(interval);
     };
   }, [isActive, timeLeft, handleTimeUp]);
 
-  const startQuiz = () => {
-    setQuestions(shuffleArray(mockQuizData));
+  // Start quiz
+  const startQuiz = useCallback(() => {
     setIsActive(true);
     setTimeLeft(20);
     setCurrentQuestion(0);
@@ -144,14 +287,14 @@ const QuizApp = () => {
     setQuizCompleted(false);
     setShowResult(false);
     setSelectedAnswer(null);
-  };
+    setUserName("");
+    setSubmitMessage("");
+    setQuestions(shuffleArray(questions));
+    console.log("Quiz started");
+  }, [questions]);
 
-  const handleAnswerSelect = (answerIndex: number) => {
-    if (!isActive || showResult) return;
-    setSelectedAnswer(answerIndex);
-  };
-
-  const resetQuiz = () => {
+  // Reset quiz
+  const resetQuiz = useCallback(() => {
     setCurrentQuestion(0);
     setSelectedAnswer(null);
     setTimeLeft(20);
@@ -160,48 +303,164 @@ const QuizApp = () => {
     setQuizCompleted(false);
     setShowResult(false);
     setShowExplanation(false);
-    setQuestions(shuffleArray(mockQuizData));
-  };
+    setUserName("");
+    setSubmitMessage("");
+    localStorage.removeItem("quizQuestions");
+    localStorage.removeItem("quizCacheTime");
+    fetchQuestions();
+    console.log("Quiz reset");
+  }, [fetchQuestions]);
 
+  // Toggle explanation (unchanged)
   const toggleExplanation = () => {
     setShowExplanation(!showExplanation);
   };
 
+  // Format time (unchanged)
   const formatTime = (seconds: number) => {
     return seconds.toString().padStart(2, "0");
   };
 
+  // Get timer color (unchanged)
   const getTimerColor = () => {
     if (timeLeft <= 5) return "text-red-500";
     if (timeLeft <= 10) return "text-yellow-500";
     return "text-green-500";
   };
 
+  // Get progress width (unchanged)
   const getProgressWidth = () => {
     return ((20 - timeLeft) / 20) * 100;
   };
 
-  if (quizCompleted) {
+  // Loading screen (unchanged)
+  if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
         <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20">
+          <div className="flex items-center justify-center gap-2">
+            <svg
+              className="animate-spin h-5 w-5 text-white"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8v8z"
+              />
+            </svg>
+            <p className="text-white text-lg">Loading questions...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error screen
+  if (error && questions.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
+        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20">
+          <p className="text-red-400 text-lg">{error}</p>
+          <button
+            onClick={() => {
+              setUserName("");
+              setSubmitMessage("");
+              resetQuiz();
+            }}
+            className="mt-4 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Quiz completed screen
+  if (quizCompleted) {
+    const percentage = Math.round((score / questions.length) * 100);
+    const showConfetti = percentage >= 80;
+
+    return (
+      <div
+        className={`min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4 relative ${
+          showConfetti ? "animate-pulseLight" : ""
+        }`}
+      >
+        {showConfetti && (
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            {[...Array(20)].map((_, i) => (
+              <Snowflake
+                key={i}
+                className="absolute text-white/70 w-6 h-6 animate-confetti"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  animationDelay: `${Math.random() * 2}s`,
+                  animationDuration: `${2 + Math.random() * 2}s`,
+                }}
+              />
+            ))}
+          </div>
+        )}
+        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20 relative z-10">
           <div className="mb-6">
             <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
               <CheckCircle className="w-10 h-10 text-white" />
             </div>
             <h2 className="text-3xl font-bold text-white mb-2">
-              Quiz Completed!
+              {showConfetti ? "Congratulations!" : "Quiz Completed!"}
             </h2>
             <div className="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500 mb-2">
               {score}/{questions.length}
             </div>
             <p className="text-gray-300 text-lg">
-              You scored {Math.round((score / questions.length) * 100)}%
+              You scored {percentage}%{showConfetti ? " - Amazing job!" : ""}
             </p>
           </div>
-
+          <div className="mb-6">
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="Enter your name"
+              className="w-full p-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <button
+              onClick={submitScoreViaEmail}
+              disabled={isSubmitting}
+              className={`w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 shadow-lg ${
+                isSubmitting ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              {isSubmitting ? "Submitting..." : "Submit Score"}
+            </button>
+            {submitMessage && (
+              <p
+                className={`mt-2 text-sm ${
+                  submitMessage.includes("Error")
+                    ? "text-red-400"
+                    : "text-green-400"
+                }`}
+              >
+                {submitMessage}
+              </p>
+            )}
+          </div>
           <button
-            onClick={resetQuiz}
+            onClick={() => {
+              setUserName("");
+              setSubmitMessage("");
+              resetQuiz();
+            }}
             className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 shadow-lg"
           >
             <RefreshCw className="w-5 h-5" />
@@ -212,6 +471,7 @@ const QuizApp = () => {
     );
   }
 
+  // Start screen (unchanged)
   if (!isActive && currentQuestion === 0 && !showResult) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
@@ -231,8 +491,12 @@ const QuizApp = () => {
               </span>{" "}
               per question!
             </p>
+            {error && (
+              <p className="text-yellow-400 text-sm mb-4">
+                {error} You can still play with mock data.
+              </p>
+            )}
           </div>
-
           <button
             onClick={startQuiz}
             className="w-full bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-lg shadow-lg"
@@ -245,11 +509,10 @@ const QuizApp = () => {
     );
   }
 
+  // Quiz in progress (unchanged)
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex pt-[15%] justify-center p-4">
-      <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-2xl min-h-[300px] w-full shadow-2xl border border-white/20">
-       
-        {/* Header */}
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
+      <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-white/20">
         <div className="flex justify-between items-center mb-8">
           <div className="text-white">
             <span className="text-sm opacity-75">Question</span>
@@ -257,8 +520,6 @@ const QuizApp = () => {
               {currentQuestion + 1} / {questions.length}
             </div>
           </div>
-
-          {/* Countdown Timer */}
           <div className="text-center">
             <div
               className={`text-4xl font-bold ${getTimerColor()} flex items-center gap-2`}
@@ -279,25 +540,19 @@ const QuizApp = () => {
               />
             </div>
           </div>
-
           <div className="text-white text-right">
             <span className="text-sm opacity-75">Score</span>
             <div className="text-xl font-bold">{score}</div>
           </div>
         </div>
-
-        {/* Question */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h2 className="text-2xl font-bold text-white mb-6 leading-relaxed">
             {questions[currentQuestion].question}
           </h2>
-
-          {/* Options */}
           <div className="space-y-3">
             {questions[currentQuestion].options.map((option, index) => {
               let buttonClass =
                 "w-full p-4 text-left rounded-xl transition-all duration-300 transform hover:scale-105 ";
-
               if (showResult) {
                 if (index === questions[currentQuestion].correctAnswer) {
                   buttonClass +=
@@ -321,7 +576,6 @@ const QuizApp = () => {
                     "bg-white/10 border border-white/20 text-white hover:bg-white/20";
                 }
               }
-
               return (
                 <button
                   key={index}
@@ -349,8 +603,6 @@ const QuizApp = () => {
             })}
           </div>
         </div>
-
-        {/* Action Buttons */}
         <div className="flex gap-4">
           {!showResult && selectedAnswer !== null && (
             <button
@@ -360,19 +612,17 @@ const QuizApp = () => {
               Submit Answer
             </button>
           )}
-
           {showResult && (
-            <div className="container mx-auto flex space-x-4 sm:gap-4">
+            <div className="container mx-auto flex gap-2 sm:gap-4">
               <button
                 onClick={toggleExplanation}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                className="flex-1 bg-gradient-to-r text-center from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold px-1 sm:px-4 py-3 sm:py-4 transition-all duration-300 transform hover:scale-105"
               >
-                {showExplanation ? "Hide Explanation" : "Show Explanation"} 
+                {showExplanation ? "Hide Explanation" : "Show Explanation"}
               </button>
-
               <button
                 onClick={moveToNext}
-                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 sm:py-4 sm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
+                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-600 hover:to-blue-600 sm:px-4"
               >
                 {currentQuestion === questions.length - 1
                   ? "Finish Quiz"
@@ -381,8 +631,6 @@ const QuizApp = () => {
             </div>
           )}
         </div>
-
-        {/* Explanation */}
         {showResult && showExplanation && (
           <div className="mt-6 p-4 bg-white/10 rounded-xl border border-white/20">
             <h3 className="text-lg font-semibold text-white mb-2">
