@@ -246,7 +246,7 @@ const QuizApp = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex pt-[15%] justify-center p-4">
       <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-2xl min-h-[300px] w-full shadow-2xl border border-white/20">
        
         {/* Header */}
@@ -365,7 +365,7 @@ const QuizApp = () => {
             <div className="container mx-auto flex space-x-4 sm:gap-4">
               <button
                 onClick={toggleExplanation}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 px-1 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
               >
                 {showExplanation ? "Hide Explanation" : "Show Explanation"} 
               </button>
