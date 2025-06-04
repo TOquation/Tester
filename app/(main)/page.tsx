@@ -1,12 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import {
-  Clock,
-  CheckCircle,
-  XCircle,
-  RefreshCw,
-  Play,
-} from "lucide-react";
+import { Clock, CheckCircle, XCircle, RefreshCw, Play } from "lucide-react";
+import TechQuizHeader from "@/components/animated-header";
 
 // Mock quiz data - replace with your API call
 const mockQuizData = [
@@ -51,7 +46,7 @@ const mockQuizData = [
       "Au comes from the Latin word 'aurum' meaning gold. It's element 79 on the periodic table.",
   },
   {
-    id: 5,
+    id: 6,
     question: "Who is God to you?",
     options: ["Father", "Friend", "Maker", "All"],
     correctAnswer: 3,
@@ -59,6 +54,9 @@ const mockQuizData = [
       "Who God is to you can vary greatly depending on personal beliefs and experiences. Many see God as a father figure, a friend, or the creator of the universe, while others may have different interpretations.",
   },
 ];
+
+// Animated Header Component
+<TechQuizHeader />
 
 const QuizApp = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -69,7 +67,17 @@ const QuizApp = () => {
   const [quizCompleted, setQuizCompleted] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
-  const [questions] = useState(mockQuizData);
+  const [questions, setQuestions] = useState(mockQuizData);
+
+  // Function to shuffle array (Fisher-Yates algorithm)
+  const shuffleArray = (array: any[]) => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  };
 
   // Timer effect
   useEffect(() => {
@@ -89,6 +97,8 @@ const QuizApp = () => {
   }, [isActive, timeLeft]);
 
   const startQuiz = () => {
+    // Shuffle questions when starting the quiz
+    setQuestions(shuffleArray(mockQuizData));
     setIsActive(true);
     setTimeLeft(20);
     setCurrentQuestion(0);
@@ -150,6 +160,8 @@ const QuizApp = () => {
     setQuizCompleted(false);
     setShowResult(false);
     setShowExplanation(false);
+    // Shuffle questions again when resetting
+    setQuestions(shuffleArray(mockQuizData));
   };
 
   const toggleExplanation = () => {
@@ -173,9 +185,10 @@ const QuizApp = () => {
   if (quizCompleted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-white/20">
+        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20">
+         
           <div className="mb-6">
-            <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
               <CheckCircle className="w-10 h-10 text-white" />
             </div>
             <h2 className="text-3xl font-bold text-white mb-2">
@@ -184,14 +197,14 @@ const QuizApp = () => {
             <div className="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500 mb-2">
               {score}/{questions.length}
             </div>
-            <p className="text-gray-300">
+            <p className="text-gray-300 text-lg">
               You scored {Math.round((score / questions.length) * 100)}%
             </p>
           </div>
 
           <button
             onClick={resetQuiz}
-            className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 shadow-lg"
           >
             <RefreshCw className="w-5 h-5" />
             Try Again
@@ -204,23 +217,27 @@ const QuizApp = () => {
   if (!isActive && currentQuestion === 0 && !showResult) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-white/20">
-          <div className="mb-8">
-            <div className="w-20 h-20 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Play className="w-10 h-10 text-white ml-1" />
-            </div>
-            <h1 className="text-4xl font-bold text-white mb-4">
-              Quiz Challenge
-            </h1>
-            <p className="text-gray-300 mb-6">
-              Test your knowledge with {questions.length} questions. You have 20
-              seconds per question!
+        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-lg w-full text-center shadow-2xl border border-white/20">
+          <TechQuizHeader />
+          <div className="mb-8 mt-4">
+            <p className="text-gray-300 mb-6 text-lg leading-relaxed">
+              Test your knowledge with{" "}
+              <span className="text-purple-300 font-semibold">
+                {questions.length} questions
+              </span>
+              .
+              <br />
+              You have{" "}
+              <span className="text-blue-300 font-semibold">
+                20 seconds
+              </span>{" "}
+              per question!
             </p>
           </div>
 
           <button
             onClick={startQuiz}
-            className="w-full bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-lg"
+            className="w-full bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-4 px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2 text-lg shadow-lg"
           >
             <Play className="w-6 h-6" />
             Start Quiz
@@ -232,7 +249,7 @@ const QuizApp = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4">
-      <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-2xl w-full shadow-2xl border border-white/20">
+      <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 max-w-2xl min-h-[300px] w-full shadow-2xl border border-white/20">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div className="text-white">
@@ -357,7 +374,7 @@ const QuizApp = () => {
 
                 <button
                   onClick={moveToNext}
-                  className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 xsm:py-4 px-4 xsm:px-8 rounded-xl transition-all duration-300 transform hover:scale-105"
+                  className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 xsm:py-4 px-4 xsm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
                 >
                   {currentQuestion === questions.length - 1
                     ? "Finish Quiz"
