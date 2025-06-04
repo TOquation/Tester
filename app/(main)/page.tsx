@@ -362,17 +362,17 @@ const QuizApp = () => {
           )}
 
           {showResult && (
-            <div className="container mx-auto flex gap-2 sm:gap-4">
+            <div className="container mx-auto flex space-x-4 sm:gap-4">
               <button
                 onClick={toggleExplanation}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 px-3 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
+                className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-3 sm:py-4 px-1 sm:px-6 rounded-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
               >
-                {showExplanation ? "Hide" : "Show"} Explanation
+                {showExplanation ? "Hide Explanation" : "Show Explanation"} 
               </button>
 
               <button
                 onClick={moveToNext}
-                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 sm:py-4 px-4 sm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
+                className="flex-1 bg-gradient-to-r from-green-400 to-blue-500 hover:from-green-500 hover:to-blue-600 text-white font-semibold py-3 sm:py-4 sm:px-[2.1rem] rounded-xl transition-all duration-300 transform hover:scale-105"
               >
                 {currentQuestion === questions.length - 1
                   ? "Finish Quiz"
